@@ -4,10 +4,15 @@ using ModelContextProtocol.Logging;
 using ModelContextProtocol.Protocol.Messages;
 using ModelContextProtocol.Utils;
 using ModelContextProtocol.Utils.Json;
+using System;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.ServerSentEvents;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace ModelContextProtocol.Protocol.Transport;
 
@@ -85,6 +90,51 @@ internal sealed class SseClientSessionTransport : TransportBase
         }
     }
 
+
+
+
+
+
+
+
+
+    private static async Task<HttpContent> CloneHttpContentAsync(HttpContent original)
+    {
+        var ms = new MemoryStream();
+        await original.CopyToAsync(ms).ConfigureAwait(false);
+        ms.Position = 0;
+
+        var clone = new StreamContent(ms);
+        foreach (var header in original.Headers)
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        return clone;
+    }
+
+
+
+
+    public static async Task DumpHttpPostAsync(HttpClient client, string url, HttpContent content, CancellationToken cancellationToken = default)
+    {
+        // Clone the content so we can read it without disrupting the original stream
+        var contentCopy = await CloneHttpContentAsync(content);
+
+        // Dump content
+        Debug.WriteLine("=== HTTP POST Request ===");
+        Debug.WriteLine($"POST {url}");
+        Debug.WriteLine("Headers:");
+        foreach (var header in contentCopy.Headers)
+        {
+            Debug.WriteLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        }
+
+        var body = await contentCopy.ReadAsStringAsync();
+        Debug.WriteLine("Body:");
+        Debug.WriteLine(body);
+        Debug.WriteLine("=========================");
+    }
+
+
     /// <inheritdoc/>
     public override async Task SendMessageAsync(
         IJsonRpcMessage message,
@@ -105,6 +155,10 @@ internal sealed class SseClientSessionTransport : TransportBase
         {
             messageId = messageWithId.Id.ToString();
         }
+
+
+
+        await DumpHttpPostAsync(_httpClient, _messageEndpoint.AbsolutePath.ToString(), content, cancellationToken);
 
         var response = await _httpClient.PostAsync(
             _messageEndpoint,
@@ -187,6 +241,43 @@ internal sealed class SseClientSessionTransport : TransportBase
 
     internal SseClientTransportOptions Options => _options;
 
+
+    public async Task DumpHttpGetSseAsync(HttpClient client, string sseEndpoint, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, sseEndpoint);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        // Dump request
+        Debug.WriteLine("=== HTTP GET Request ===");
+        Debug.WriteLine($"{request.Method} {request.RequestUri}");
+        Debug.WriteLine("Headers:");
+        foreach (var header in request.Headers)
+        {
+            Debug.WriteLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        }
+        Debug.WriteLine("=========================");
+
+        using var response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        ).ConfigureAwait(false);
+
+        // Dump response
+        Debug.WriteLine("=== HTTP Response ===");
+        Debug.WriteLine($"Status: {(int)response.StatusCode} {response.ReasonPhrase}");
+        Debug.WriteLine("Headers:");
+        foreach (var header in response.Headers)
+        {
+            Debug.WriteLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        }
+        foreach (var header in response.Content.Headers)
+        {
+            Debug.WriteLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        }
+        Debug.WriteLine("=======================");
+    }
+
     private async Task ReceiveMessagesAsync(CancellationToken cancellationToken)
     {
         int reconnectAttempts = 0;
@@ -197,6 +288,9 @@ internal sealed class SseClientSessionTransport : TransportBase
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, _sseEndpoint);
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+                await DumpHttpGetSseAsync(_httpClient, _sseEndpoint.AbsoluteUri.ToString(), cancellationToken);
+
 
                 using var response = await _httpClient.SendAsync(
                     request,

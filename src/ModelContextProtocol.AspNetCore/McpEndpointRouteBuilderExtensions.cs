@@ -9,7 +9,9 @@ using ModelContextProtocol.Protocol.Transport;
 using ModelContextProtocol.Server;
 using ModelContextProtocol.Utils.Json;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Microsoft.AspNetCore.Builder;
 
@@ -33,8 +35,36 @@ public static class McpEndpointRouteBuilderExtensions
 
         var routeGroup = endpoints.MapGroup("");
 
+
+        
+
+
         routeGroup.MapGet("/sse", async context =>
         {
+
+
+
+
+            var request = context.Request;
+            var headersLog = new StringBuilder();
+            foreach (var header in request.Headers)
+            {
+                // Consistent indentation for headers within the log message
+                headersLog.AppendLine($"    {header.Key}: {header.Value}");
+            }
+
+            // Construct the full string using interpolation and pass it to Debug.WriteLine
+            Debug.WriteLine(
+                $"=== Incoming message Request ===\n" +
+                $"Method: {request.Method}\n" +
+                $"Path: {request.Path}\n" +
+                $"QueryString: {request.QueryString.ToString()}\n" + // Use ToString() for full query
+                $"Headers:\n{headersLog.ToString().TrimEnd()}\n" + // Trim trailing newline from headers block
+                $"=========================="
+            );
+
+
+
             var response = context.Response;
             var requestAborted = context.RequestAborted;
 
@@ -77,6 +107,27 @@ public static class McpEndpointRouteBuilderExtensions
 
         routeGroup.MapPost("/message", async context =>
         {
+
+
+            var request = context.Request;
+            var headersLog = new StringBuilder();
+            foreach (var header in request.Headers)
+            {
+                // Consistent indentation for headers within the log message
+                headersLog.AppendLine($"    {header.Key}: {header.Value}");
+            }
+
+            // Construct the full string using interpolation and pass it to Debug.WriteLine
+            Debug.WriteLine(
+                $"=== Incoming message Request ===\n" +
+                $"Method: {request.Method}\n" +
+                $"Path: {request.Path}\n" +
+                $"QueryString: {request.QueryString.ToString()}\n" + // Use ToString() for full query
+                $"Headers:\n{headersLog.ToString().TrimEnd()}\n" + // Trim trailing newline from headers block
+                $"=========================="
+            );
+
+
             if (!context.Request.Query.TryGetValue("sessionId", out var sessionId))
             {
                 await Results.BadRequest("Missing sessionId query parameter.").ExecuteAsync(context);
