@@ -461,6 +461,8 @@ public class Program
         To get the result of the last command executed use: DbgValFromString value=""$VariableName"" Example: DbgValFromString value=""$result""
         To get address results from findallmem scans: DbgValFromString value=ref.addr(zeroBasedIndex) Example: DbgValFromString value=ref.addr(0)
 
+        If a command fails to work as expected, ensure your Quotes and Commas are in the correct place!!!
+
         Start by determining the first command you need to issue to begin this task. Remember to not use any prefix when you want to execute a command, just the command and the arguments itself.
 
         # MCP Integration Guide for AI Assistants
@@ -697,7 +699,8 @@ public class Program
 
                     if (line.Equals("continue", StringComparison.OrdinalIgnoreCase))
                     {
-                        SignalBackToHumanControl = true;
+                        SignalBackToHumanControl = false;
+                        AllowForInput = false;
                         continue;
                     }
                     if (line.Equals("help", StringComparison.OrdinalIgnoreCase))
@@ -716,6 +719,7 @@ public class Program
                     }
                     else if (line.Equals("exit", StringComparison.OrdinalIgnoreCase))
                     {
+                        AllowForInput = true;
                         SignalBackToHumanControl = true;
                         break;
                     }
