@@ -1,10 +1,15 @@
-This is a sample c# MCP client for use with the x64Dbg MCP Server.
+This is a sample C# MCP client designed for use with the x64Dbg MCP Server.
 
-To use import the environment variables or hardcode the values into 
+To get started, either import the necessary environment variables or hardcode the values directly into the following lines:
 
-Ln. 564 (QuickstartClient\Program.cs) - string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
-Ln. 565 (QuickstartClient\Program.cs)- string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
+Line 564 (QuickstartClient\Program.cs):
+string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
 
-Once completed, Update the prompt to use your intended usecase (Also located in Program.cs), then start.
+Line 565 (QuickstartClient\Program.cs):
+string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
 
-The client is expected to connect to the MCP Server and will start issuing commands to begin its debug process within X64DBG
+After setting the values, update the prompt to reflect your intended use case (also located in Program.cs), then run the application.
+
+While running, your AI model will automatically begin executing tasks. You may hold Shift to interrupt its next action and manually type commands if needed.
+
+The client is expected to connect to the MCP Server and will begin issuing commands to start the debugging process within x64Dbg.
