@@ -10,6 +10,7 @@ using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -365,6 +366,9 @@ public class CommandProcessor
 // Main program class
 public class Program
 {
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vKey);
+    const int VK_SHIFT = 0x10;
 
     static bool TryParseGeminiCommand(string? text, out string commandName, out Dictionary<string, object?> parameters)
     {
@@ -430,6 +434,16 @@ public class Program
         Console.ResetColor();
     }
 
+    //static string TaskString =
+    //    "Your current task is to: Find the command to load the application located at 'C:\\InjectGetTickCount\\InjectSpeed.exe', then get the list of loaded modules for that application process. Finally, report the total count of modules found and list their names.\r\n        " +
+    //    "Once that task is completed, start labeling each important function within the disassembly of the main application, ignore the JMP table at the top of the binary for this task. REMEMBER, THIS IS A 64BIT APPLICAITON!\r\n        " +
+    //    "Once you have labeled 10 critical parts of the code, update the code to point to calc.exe instead of TenMilesToSafety-Win64-Shipping.exe";
+
+    static string TaskString =
+        "Your current task is to: Find the command to load the application located at 'D:\\SteamLibrary\\steamapps\\common\\10 Miles To Safety\\TenMilesToSafety\\Binaries\\Win64\\TenMilesToSafety-Win64-Shipping.exe', " +
+        "then find which method is best to create a Speedhack for the video game. You may label and comment the binary, " +
+        "but do not write any memory to the binary. Once done, state the exact steps required for the least amount of resistant to pull off the speed hack.";
+
 
     static string initialPrompt = $@"You are an AI assistant with access to an MCP (Model Context Protocol) server for x64dbg Debugger. Your goal is to complete tasks by calling the available commands on this server.
         When you need to execute a command, output ONLY the command on a line, followed by the command name and parameters in the format: paramName=""value"". 
@@ -440,9 +454,8 @@ public class Program
         While reviewing the Debugger commands you'll have to review the ""DebugControl"" area of the documentation.
         Once you have tha Application loaded in the debugger, use 'Refresh' to see new available commands as well and 'Help' again to see their updated documentation. If the command returns ""True"", then the command was successfully executed and you may move to the next step.
 
-        Your current task is to: Find the command to load the application located at 'C:\InjectGetTickCount\InjectSpeed.exe', then get the list of loaded modules for that application process. Finally, report the total count of modules found and list their names.
-        Once that task is completed, start labeling each important function within the disassembly of the main application, ignore the JMP table at the top of the binary for this task. REMEMBER, THIS IS A 64BIT APPLICAITON!
-        Once you have labeled 10 critical parts of the code, update the code to point to calc.exe instead of TenMilesToSafety-Win64-Shipping.exe
+        {TaskString}
+
         To get the Modules EntryPoint use the command: DbgValFromString value=""?entry""
         To get the base address of a module use the command: DbgValFromString value=""ModuleName.exe""
         To get the result of the last command executed use: DbgValFromString value=""$VariableName"" Example: DbgValFromString value=""$result""
@@ -606,23 +619,41 @@ public class Program
 
         String? CurrentMessageToPassBackToAi = initialPrompt;
         //ListDebuggerCommands
+        bool AllowForInput = false;
         bool SignalBackToHumanControl = false;
         bool AnyCommandProcess = false;
         //while (Console.ReadLine() is string query && !"exit".Equals(query, StringComparison.OrdinalIgnoreCase))
-        while(CurrentMessageToPassBackToAi != "exit")
+        bool shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        while (CurrentMessageToPassBackToAi != "exit")
         {
-            if (string.IsNullOrWhiteSpace(CurrentMessageToPassBackToAi))
-            {
-                Console.WriteLine("Message to AI is empty or null, stopping conversation.");
-                break; // Exit the outer loop if the message is invalid
-            }
-
             string? query = "";
-            
-            while (!SignalBackToHumanControl)
+
+            //if (shiftPressed)
+            //{
+            //    AllowForInput = true;
+            //    Debug.WriteLine("Ready for Human input");
+            //    CurrentMessageToPassBackToAi = Console.ReadLine();
+            //}
+
+            while (AllowForInput || !SignalBackToHumanControl) //If shift is held, skip to commandline
             {
+
+                shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                if (shiftPressed)
+                {
+                    AllowForInput = true;
+                    SignalBackToHumanControl = true;
+                    break;
+                }
+
                 if (!SignalBackToHumanControl)
                 {
+                    if (string.IsNullOrWhiteSpace(CurrentMessageToPassBackToAi))
+                    {
+                        Console.WriteLine("Message to AI is empty or null, stopping conversation.");
+                        break; // Exit the outer loop if the message is invalid
+                    }
                     query = await MyGem.SendChatMessageAsync(CurrentMessageToPassBackToAi);
                     if (string.IsNullOrWhiteSpace(query))
                     {
@@ -633,6 +664,12 @@ public class Program
                 else
                 {
                     query = CurrentMessageToPassBackToAi;
+                }
+
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    Debug.WriteLine("Query is blank");
+                    break;
                 }
 
                 //Console.ForegroundColor = ConsoleColor.Cyan;
@@ -756,12 +793,13 @@ public class Program
                     }
                 }
 
-                if (!AnyCommandProcess)
+                if (!AnyCommandProcess && !SignalBackToHumanControl)
                 {
                     CurrentMessageToPassBackToAi = "Okay, continue...";
                 }
                 PromptForConsoleInput();
             }
+            Debug.WriteLine("Ready for Human input");
             CurrentMessageToPassBackToAi = Console.ReadLine();
         }
     }
