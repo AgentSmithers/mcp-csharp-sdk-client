@@ -1,14 +1,7 @@
-﻿// Required using statements
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Net.Http; // Required for HttpClient
+﻿using System.Diagnostics;
 using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json; // Use Newtonsoft.Json consistently
 using Newtonsoft.Json.Serialization; // For CamelCasePropertyNamesContractResolver if needed, not used here
-
 // Remove System.Text.Json to avoid ambiguity
 // using System.Text.Json;
 

@@ -577,8 +577,10 @@ public class Program
     {
 
         string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
+        string? AnthropicAIKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
         GeminiAI MyGem = new GeminiAI(GeminiAIKey);
+        AnthropicAI MyClaude = new AnthropicAI(AnthropicAIKey);
         //Debug.WriteLine(await MyGem.SendChatMessageAsync(initialPrompt));
         //Debug.WriteLine(await MyGem.SendChatMessageAsync("My name is Mike"));
         //Debug.WriteLine(await MyGem.SendChatMessageAsync("What is my name?"));
@@ -656,7 +658,8 @@ public class Program
                         Console.WriteLine("Message to AI is empty or null, stopping conversation.");
                         break; // Exit the outer loop if the message is invalid
                     }
-                    query = await MyGem.SendChatMessageAsync(CurrentMessageToPassBackToAi);
+                    //query = await MyGem.SendChatMessageAsync(CurrentMessageToPassBackToAi);
+                    query = await MyClaude.SendChatMessageAsync(CurrentMessageToPassBackToAi);
                     if (string.IsNullOrWhiteSpace(query))
                     {
                         PromptForConsoleInput();
