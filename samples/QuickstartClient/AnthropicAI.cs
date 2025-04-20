@@ -6,10 +6,6 @@ using System.Threading.Tasks; // Ensure Task is available
 using System.Collections.Generic; // For List<>
 using System.Linq; // For FirstOrDefault()
 
-// Optional: Define a namespace consistent with your project structure
-// namespace YourProjectNamespace
-// {
-
 /// <summary>
 /// A client class to interact with the Anthropic Claude API.
 /// Manages conversation history per instance, similar to the GeminiAI client.
@@ -31,9 +27,6 @@ internal class AnthropicAI
     private static readonly HttpClient httpClient = new HttpClient();
 
     #region Claude API Data Classes
-    // Nested or separate, define the API contract
-
-    // Request structure for Claude
     private class ClaudeRequest
     {
         [JsonProperty("model")]
@@ -44,10 +37,6 @@ internal class AnthropicAI
 
         [JsonProperty("messages")]
         public Content[] Messages { get; set; } = Array.Empty<Content>();
-
-        // Add other parameters like temperature, system prompt if needed
-        // [JsonProperty("system", NullValueHandling = NullValueHandling.Ignore)]
-        // public string? SystemPrompt { get; set; }
     }
 
     // Content structure for messages (used in request and history)
