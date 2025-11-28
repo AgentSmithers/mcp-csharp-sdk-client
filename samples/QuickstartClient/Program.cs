@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol.Transport;
@@ -15,418 +15,15 @@ public class Program
     static extern short GetAsyncKeyState(int vKey);
     const int VK_SHIFT = 0x10;
 
-    public static async Task Main(string[] args)
-    {
+    //static bool AllowForInput = false;
+    static bool SignalBackToHumanControl = false;
+    static bool AnyCommandProcessed = false;
+    static bool DidAnyCommandExecute = false;
 
-        string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
-        string? AnthropicAIKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-        string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
-        GeminiAI MyGem = new GeminiAI(GeminiAIKey);
-        AnthropicAI MyClaude = new AnthropicAI(AnthropicAIKey);
-        //Debug.WriteLine(await MyGem.SendChatMessageAsync(initialPrompt));
-        //Debug.WriteLine(await MyGem.SendChatMessageAsync("My name is Mike"));
-        //Debug.WriteLine(await MyGem.SendChatMessageAsync("What is my name?"));
+    static String? CurrentMessageToPassBackToAi = null;
 
-        // Place these static helpers inside the Program class or keep them accessible
-        await using var mcpClient = await McpClientFactory.CreateAsync(new()
-        {
-            Id = "demo-server",
-            Name = "Demo Server",
-            TransportType = TransportTypes.Sse,
-            Location = "http://" + MCPServerIP + ":3001/sse",
-            //Location = "http://" + "Localhost" + ":4858/McpHandler.ashx/sse", //LocalHost is required for IIS, 127.0.0.1 will not work
-            //Location = "http://" + "Localhost" + ":64163/McpHandler.ashx/sse", //LocalHost is required for IIS, 127.0.0.1 will not work
-            //Location = "http://localhost:3001/sse",
-        });
-        var builder = Host.CreateApplicationBuilder(args);
-
-        builder.Configuration
-            .AddEnvironmentVariables()
-            .AddUserSecrets<Program>();
-
-        var (command, arguments) = GetCommandAndArguments(args);
-
-        // Create a command processor
-        var commandProcessor = new CommandProcessor();
-
-        // Initialize with available commands from the server
-        await commandProcessor.RefreshAvailableCommandsAsync(mcpClient);
-
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("MCP Client Started!");
-        Console.ResetColor();
-
-        PromptForConsoleInput();
-
-        String? CurrentMessageToPassBackToAi = initialPrompt;
-        //ListDebuggerCommands
-        bool AllowForInput = false;
-        bool SignalBackToHumanControl = false;
-        bool AnyCommandProcess = false;
-        //while (Console.ReadLine() is string query && !"exit".Equals(query, StringComparison.OrdinalIgnoreCase))
-        bool shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        while (CurrentMessageToPassBackToAi != "exit")
-        {
-            string? query = "";
-
-            //if (shiftPressed)
-            //{
-            //    AllowForInput = true;
-            //    Debug.WriteLine("Ready for Human input");
-            //    CurrentMessageToPassBackToAi = Console.ReadLine();
-            //}
-
-            while (AllowForInput || !SignalBackToHumanControl) //If shift is held, skip to commandline
-            {
-
-                shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-
-                if (shiftPressed)
-                {
-                    AllowForInput = true;
-                    SignalBackToHumanControl = true;
-                    break;
-                }
-
-                if (!SignalBackToHumanControl)
-                {
-                    if (string.IsNullOrWhiteSpace(CurrentMessageToPassBackToAi))
-                    {
-                        Console.WriteLine("Message to AI is empty or null, stopping conversation.");
-                        break; // Exit the outer loop if the message is invalid
-                    }
-                    //query = await MyGem.SendChatMessageAsync(CurrentMessageToPassBackToAi);
-                    query = await MyClaude.SendChatMessageAsync(CurrentMessageToPassBackToAi);
-                    if (string.IsNullOrWhiteSpace(query))
-                    {
-                        PromptForConsoleInput();
-                        continue;
-                    }
-                }
-                else
-                {
-                    query = CurrentMessageToPassBackToAi;
-                }
-
-                if (string.IsNullOrWhiteSpace(query))
-                {
-                    Debug.WriteLine("Query is blank");
-                    break;
-                }
-
-                //Console.ForegroundColor = ConsoleColor.Cyan;
-                //Console.WriteLine(CurrentMessageToPassBackToAi);
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine(query);
-                Console.ResetColor();
-
-
-                // Assume 'query' is the input string potentially containing multiple lines
-                string[] lines = query.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-                AnyCommandProcess = false;
-                CurrentMessageToPassBackToAi = "";
-                foreach (var line in lines)
-                {
-                    // Trim whitespace from the start and end of the line
-                    string trimmedLine = line.Trim();
-
-                    // Skip if the line is effectively empty after trimming
-                    if (string.IsNullOrWhiteSpace(trimmedLine))
-                    {
-                        continue;
-                    }
-
-                    if (line.Equals("continue", StringComparison.OrdinalIgnoreCase))
-                    {
-                        SignalBackToHumanControl = false;
-                        AllowForInput = false;
-                        continue;
-                    }
-                    if (line.Equals("help", StringComparison.OrdinalIgnoreCase))
-                    {
-                        CurrentMessageToPassBackToAi += commandProcessor.DisplayHelpInfo();
-                        AnyCommandProcess = true;
-                        //PromptForConsoleInput();
-                        continue;
-                    }
-                    else if (line.Equals("refresh", StringComparison.OrdinalIgnoreCase))
-                    {
-                        CurrentMessageToPassBackToAi += await commandProcessor.RefreshAvailableCommandsAsync(mcpClient);
-                        AnyCommandProcess = true;
-                        //PromptForConsoleInput();
-                        continue;
-                    }
-                    else if (line.Equals("exit", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AllowForInput = true;
-                        SignalBackToHumanControl = true;
-                        break;
-                    }
-
-
-                    //Console.WriteLine($"--- Processing Line: '{trimmedLine}' ---"); // Added for clarity
-
-                    // Try to process this individual line using your command processor
-                    AnyCommandProcess = commandProcessor.ProcessUserInput(trimmedLine, out string method, out Dictionary<string, object?> parameters);
-                    if (AnyCommandProcess)
-                    {
-                        Console.WriteLine($"Invoking command from line '{trimmedLine}'...");
-
-                        try
-                        {
-                            // Pass the parameters extracted from this line
-                            var response = await mcpClient.CallToolAsync(method, parameters);
-
-                            Console.ForegroundColor = ConsoleColor.Green;
-                            Console.WriteLine("Response:");
-                            Console.ResetColor();
-
-                            if (response is ModelContextProtocol.Protocol.Types.CallToolResponse toolResponse)
-                            {
-                                foreach (var content in toolResponse.Content)
-                                {
-                                    // Original response handling logic applied to the response for this line
-                                    // Note: Removed redundant check `if (content.Type == "Text" && !String.IsNullOrEmpty(content.Text))`
-                                    // as the subsequent check `if (!string.IsNullOrWhiteSpace(content.Text))` covers non-empty text.
-                                    // If the original check had a different specific purpose, it might need to be adjusted.
-
-                                    if (!string.IsNullOrWhiteSpace(content.Text))
-                                    {
-                                        Console.WriteLine(content.Text);
-                                        // Be aware: This will be overwritten by the text from the *last* successfully processed line's response content.
-                                        // If you need to accumulate results, you'll need a different approach (e.g., a List<string>).
-                                        CurrentMessageToPassBackToAi += content.Text;
-                                    }
-                                    else if (content.Data is string data)
-                                    {
-                                        Console.WriteLine(data);
-                                        // Consider if data should also update CurrentMessageToPassBackToAi
-                                    }
-                                    else if (content.Resource is { Uri: not null } resource)
-                                    {
-                                        Console.WriteLine($"[Resource]: {resource.Uri}");
-                                        // Consider if resource URIs should update CurrentMessageToPassBackToAi
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine("[Unknown content format in response]");
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine(response?.ToString() ?? "[null response]");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            // Include the specific line that caused the error in the message
-                            Console.WriteLine($"Error calling method for line '{trimmedLine}': {ex.Message}");
-                            Console.ResetColor();
-                            // Optionally decide if an error on one line should stop processing subsequent lines (e.g., add a 'break;' here)
-                        }
-                    }
-                    else
-                    {
-                        // Handle cases where ProcessUserInput fails for a specific line
-                        //Console.ForegroundColor = ConsoleColor.Yellow;
-                        //Console.WriteLine($"Could not process input line: '{trimmedLine}'");
-                        //Console.ResetColor();
-                    }
-                }
-
-                if (!AnyCommandProcess && !SignalBackToHumanControl)
-                {
-                    CurrentMessageToPassBackToAi = "Okay, continue...";
-                }
-                PromptForConsoleInput();
-            }
-            Debug.WriteLine("Ready for Human input");
-            CurrentMessageToPassBackToAi = Console.ReadLine();
-        }
-    }
-
-    public static async Task Main_bak(string[] args)
-    {
-
-
-        GeminiAI MyGem = new GeminiAI("", "gemini-2.5-pro-exp-03-25");
-        //Debug.WriteLine(await MyGem.SendChatMessageAsync("Hello my name is mike."));
-        //Debug.WriteLine(await MyGem.SendChatMessageAsync("What is my name?"));
-
-
-
-        var builder = Host.CreateApplicationBuilder(args);
-
-        builder.Configuration
-            .AddEnvironmentVariables()
-            .AddUserSecrets<Program>();
-
-        var (command, arguments) = GetCommandAndArguments(args);
-
-        await using var mcpClient = await McpClientFactory.CreateAsync(new()
-        {
-            Id = "demo-server",
-            Name = "Demo Server",
-            TransportType = TransportTypes.Sse,
-            Location = "http://localhost:3001/sse",
-        });
-
-        // Create a command processor
-        var commandProcessor = new CommandProcessor();
-
-        // Initialize with available commands from the server
-        await commandProcessor.RefreshAvailableCommandsAsync(mcpClient);
-
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("MCP Client Started!");
-        Console.ResetColor();
-
-        PromptForConsoleInput();
-        while (Console.ReadLine() is string query && !"exit".Equals(query, StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                PromptForConsoleInput();
-                continue;
-            }
-
-            // Special commands
-            if (query.Equals("help", StringComparison.OrdinalIgnoreCase))
-            {
-                commandProcessor.DisplayHelpInfo();
-                PromptForConsoleInput();
-                continue;
-            }
-            else if (query.Equals("refresh", StringComparison.OrdinalIgnoreCase))
-            {
-                await commandProcessor.RefreshAvailableCommandsAsync(mcpClient);
-                PromptForConsoleInput();
-                continue;
-            }
-
-            // Process user command
-            if (commandProcessor.ProcessUserInput(query, out string method, out Dictionary<string, object?> parameters))
-            {
-                Console.WriteLine($"Invoking {method}...");
-
-                try
-                {
-                    // Pass the parameters as IReadOnlyDictionary<string, object?>
-                    var response = await mcpClient.CallToolAsync(method, parameters);
-
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("Response:");
-                    Console.ResetColor();
-
-                    if (response is ModelContextProtocol.Protocol.Types.CallToolResponse toolResponse)
-                    {
-                        foreach (var content in toolResponse.Content)
-                        {
-                            if (content.Type == "Text" && !String.IsNullOrEmpty(content.Text))
-                            {
-                                continue;
-                            }
-                            if (!string.IsNullOrWhiteSpace(content.Text))
-                            {
-                                Console.WriteLine(content.Text);
-                            }
-                            else if (content.Data is string data)
-                            {
-                                Console.WriteLine(data);
-                            }
-                            else if (content.Resource is { Uri: not null } resource)
-                            {
-                                Console.WriteLine($"[Resource]: {resource.Uri}");
-                            }
-                            else
-                            {
-                                Console.WriteLine("[Unknown content format]");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine(response?.ToString() ?? "[null response]");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"Error calling method: {ex.Message}");
-                    Console.ResetColor();
-                }
-            }
-
-            PromptForConsoleInput();
-        }
-    }
-
-    static bool TryParseGeminiCommand(string? text, out string commandName, out Dictionary<string, object?> parameters)
-    {
-        // ... (Implementation from previous step using Regex) ...
-        commandName = string.Empty;
-        parameters = new Dictionary<string, object?>();
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        string? commandLine = lines.FirstOrDefault(line => line.Trim().StartsWith("COMMAND:", StringComparison.OrdinalIgnoreCase));
-        if (commandLine == null) return false;
-        string commandPart = commandLine.Substring("COMMAND:".Length).Trim();
-        var parts = commandPart.Split(new[] { ' ' }, 2);
-        commandName = parts[0];
-        if (parts.Length > 1)
-        {
-            MatchCollection matches = Regex.Matches(parts[1], "(\\w+)\\s*=\\s*\\\"([^\\\"]*)\\\"");
-            foreach (Match match in matches)
-            {
-                if (match.Groups.Count == 3) parameters[match.Groups[1].Value] = match.Groups[2].Value;
-            }
-            // Basic fallback
-            if (!parameters.Any())
-            {
-                var paramParts = parts[1].Split(' ');
-                foreach (var p in paramParts)
-                {
-                    var kv = p.Split('=');
-                    if (kv.Length == 2) parameters[kv[0]] = kv[1];
-                }
-            }
-        }
-        return true;
-    }
-
-    static string FormatMcpResponse(object? mcpResponse)
-    {
-        // ... (Implementation from previous step formatting CallToolResponse) ...
-        if (mcpResponse == null) return "Tool executed successfully, but returned no specific data (null response).";
-        if (mcpResponse is ModelContextProtocol.Protocol.Types.CallToolResponse toolResponse)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("Tool execution result:");
-            if (toolResponse.Content == null || !toolResponse.Content.Any()) { sb.AppendLine("[No content returned]"); }
-            else
-            {
-                foreach (var content in toolResponse.Content)
-                {
-                    if (!string.IsNullOrWhiteSpace(content.Text)) sb.AppendLine($"Text: {content.Text}");
-                    else if (content.Data is string data && !string.IsNullOrWhiteSpace(data)) sb.AppendLine($"Data: {data}");
-                    else if (content.Resource is { Uri: not null } resource) sb.AppendLine($"Resource: {resource.Uri}");
-                    else sb.AppendLine("[Unknown content format in response]");
-                }
-            }
-            return sb.ToString();
-        }
-        return $"Tool execution result: {mcpResponse}";
-    }
-
-    static void PromptForInput()
-    {
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.Write("Enter command (help, 'refresh', 'history', 'clear', 'exit') or message for AI > ");
-        Console.ResetColor();
-    }
+    public static IMcpClient? mcpClient = null;
+    static CommandProcessor MCPcommandProcessor = new CommandProcessor();
 
     // for x64dbg Debugger
     //static string TaskString =
@@ -457,7 +54,10 @@ public class Program
     //    To get address results from findallmem scans: DbgValFromString value = ref.addr(zeroBasedIndex) Example: DbgValFromString value = ref.addr(0)
     //    ";
 
-    static string TaskString = "Your current task is to: Test and validate all function are working as expected. To see new available commands use 'Help'";
+    //static string TaskString = "Your current task is to: Test and validate all function are working as expected. To see new available commands use 'Help'";
+    static string TaskString = "Open notepad using the full path and locate the function responsible for loading the previous session.";
+    //static string TaskString = "Type the Help Command, then exit";
+    //static string TaskString = "You currently have zero task, just type 'end' when ready.";
 
     static string initialPrompt = $@"You are an AI assistant with access to an MCP (Model Context Protocol) server. Your goal is to complete tasks by calling the available commands on this server.
         When you need to execute a command, output ONLY the command on a line, followed by the command name and parameters in the format: paramName=""value"". 
@@ -465,8 +65,6 @@ public class Program
         my_command input_path=""C:\\path\\file.txt"", verbose=""true""
 
         Wait for the result of the command before deciding your next step. I will provide the result of each command you issue.
-
-        {TaskString}
 
         If a command fails to work as expected, ensure your Quotes and Commas are in the correct place!!!
 
@@ -577,8 +175,292 @@ public class Program
 
         Remember, the MCP server's capabilities are dynamic. Always adapt to the current set of available tools rather than assuming specific tools will be available.
 
-        Once all task are completed type: exit
+        Your Task is: {TaskString}
+
+        Once assigned task are completed type: end
+
+        To see available commands type: help
         ";
+
+    public static async Task Main(string[] args)
+    {
+        string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
+        string? AnthropicAIKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
+        string? MCPServerPORT = Environment.GetEnvironmentVariable("MCPServerPort");
+        GeminiAI MyGem = new GeminiAI(GeminiAIKey);
+
+        if (AnthropicAIKey != null)
+        {
+            AnthropicAI MyClaude = new AnthropicAI(AnthropicAIKey);
+        }
+
+        // Place these static helpers inside the Program class or keep them accessible
+        await using var mcpClientvar = await McpClientFactory.CreateAsync(new()
+        {
+            Id = "demo-server",
+            Name = "Demo Server",
+            TransportType = TransportTypes.Sse,
+            Location = "http://" + MCPServerIP + ":" + "50300" + "/sse",
+            //Location = "http://" + "Localhost" + ":4858/McpHandler.ashx/sse", //LocalHost is required for IIS, 127.0.0.1 will not work
+            //Location = "http://" + "Localhost" + ":64163/McpHandler.ashx/sse", //LocalHost is required for IIS, 127.0.0.1 will not work
+            //Location = "http://localhost:3001/sse",
+        });
+        mcpClient = mcpClientvar;
+
+        var builder = Host.CreateApplicationBuilder(args);
+
+        builder.Configuration
+            .AddEnvironmentVariables()
+            .AddUserSecrets<Program>();
+
+        var (command, arguments) = GetCommandAndArguments(args);
+
+        // Create a command processor
+        if (MCPcommandProcessor == null)
+        {
+            MCPcommandProcessor = new CommandProcessor();
+        }
+
+        // Initialize with available commands from the server
+        await MCPcommandProcessor.RefreshAvailableCommandsAsync(mcpClient);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("MCP Client Started!");
+        Console.ResetColor();
+
+        CurrentMessageToPassBackToAi = initialPrompt;
+        String? HumanResponse = null;
+
+        bool shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        bool DidAIExecuteACommand = false;
+        string? query = "";
+
+        bool ExecuteAICommandOnInit = true; //Flag to detertmine who starts the convo first, AI=TRUE, Human=FALSE.
+        if (!ExecuteAICommandOnInit)
+        {
+            Console.WriteLine(await MyGem.SendChatMessageAsync(initialPrompt)); //If the Convo does not start with the AI, prompt the human first but preload the MCP instructions to the AI
+        }
+
+        while (HumanResponse != "exit") //Only Humans can exit the program
+        {
+            SignalBackToHumanControl = false;
+            query = "";
+
+            if (!ExecuteAICommandOnInit)
+            {
+                PromptForConsoleInput();
+                HumanResponse = Console.ReadLine();
+                DidAnyCommandExecute = await SearchAndExecuteCommand(query);
+                if (DidAnyCommandExecute) //If the human executed a command
+                {
+                    continue;
+                }
+                DidAnyCommandExecute = MCPcommandProcessor.DoesCommandExist(query);
+                if (DidAnyCommandExecute) //If the human executed a command
+                {
+                    SignalBackToHumanControl = true; //Person typed in invalid command, let them try again
+                    continue;
+                }
+                ExecuteAICommandOnInit = false; //A flag to let the AI start the convo vs, the Human.
+            }
+            else
+            {
+                query = initialPrompt;
+            }
+
+            while (!SignalBackToHumanControl) //If shift is held, skip to commandline
+            {
+
+                shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                if (shiftPressed)
+                {
+                    //AllowForInput = true;
+                    SignalBackToHumanControl = true;
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    if (!string.IsNullOrWhiteSpace(HumanResponse))
+                    {
+                        query = HumanResponse;
+                    }
+                    else
+                    {
+                        Debug.WriteLine("Query is blank");
+                        break;
+                    }
+                }
+
+                if (!SignalBackToHumanControl)
+                {
+
+                    if (string.IsNullOrWhiteSpace(query))
+                    {
+                        Console.WriteLine("Message to AI is empty or null, stopping conversation.");
+                        break; // Exit the outer loop if the message is invalid
+                    }
+
+                    query = await MyGem.SendChatMessageAsync(query);
+                    //query = await MyClaude.SendChatMessageAsync(CurrentMessageToPassBackToAi);
+
+                    if (string.IsNullOrWhiteSpace(query))
+                    {
+                        PromptForConsoleInput();
+                        continue;
+                    }
+                }
+                else
+                {
+                    query = CurrentMessageToPassBackToAi;
+                }
+
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(query);
+                Console.ResetColor();
+
+                DidAIExecuteACommand = await SearchAndExecuteCommand(query);
+
+                if (!DidAIExecuteACommand)
+                {
+                    SignalBackToHumanControl = true;  //If AI did not execute a command tranfer control back to the person
+                }
+                else
+                {
+                    query = CurrentMessageToPassBackToAi; //Load the AI response into the query variable to be processed back into the AI once more.
+                }
+            }
+        }
+    }
+
+    static async Task<bool> SearchAndExecuteCommand(string query)
+    {
+        string[] lines = query.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+        CurrentMessageToPassBackToAi = "";
+        AnyCommandProcessed = false;
+        DidAnyCommandExecute = false; //Reset for this batch of commands
+        foreach (var line in lines)
+        {
+            // Trim whitespace from the start and end of the line
+            string trimmedLine = line.Trim();
+
+            // Skip if the line is effectively empty after trimming
+            if (string.IsNullOrWhiteSpace(trimmedLine))
+            {
+                continue;
+            }
+
+            if (line.Equals("continue", StringComparison.OrdinalIgnoreCase))
+            {
+                SignalBackToHumanControl = false;
+                //AllowForInput = false;
+                continue;
+            }
+            if (line.Equals("help", StringComparison.OrdinalIgnoreCase))
+            {
+                CurrentMessageToPassBackToAi += MCPcommandProcessor.DisplayHelpInfo();
+                AnyCommandProcessed = true;
+                continue;
+            }
+            else if (line.Equals("refresh", StringComparison.OrdinalIgnoreCase))
+            {
+                if (mcpClient == null)
+                {
+                    Console.WriteLine("MCP Client is not initialized.");
+                    continue;
+                }
+                CurrentMessageToPassBackToAi += await MCPcommandProcessor.RefreshAvailableCommandsAsync(mcpClient);
+                AnyCommandProcessed = true;
+                //PromptForConsoleInput();
+                continue;
+            }
+            else if (line.Equals("end", StringComparison.OrdinalIgnoreCase))
+            {
+                //AllowForInput = true;
+                SignalBackToHumanControl = true;
+                break;
+            }
+            else if (line.Equals("exit", StringComparison.OrdinalIgnoreCase))
+            {
+                //AllowForInput = true;
+                SignalBackToHumanControl = true;
+                break;
+            }
+
+            AnyCommandProcessed = MCPcommandProcessor.ValidateAndTranslateCommand(trimmedLine, out string method, out Dictionary<string, object?> parameters);
+
+            if (AnyCommandProcessed)
+            {
+                DidAnyCommandExecute = true;
+                Console.WriteLine($"Invoking command from line '{trimmedLine}'...");
+
+                try
+                {
+                    // Pass the parameters extracted from this line
+                    if (mcpClient == null)
+                    {
+                        Console.WriteLine("MCP Client is not initialized.");
+                        continue;
+                    }
+                    var response = await mcpClient.CallToolAsync(method, parameters);
+
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("Response:");
+                    Console.ResetColor();
+
+                    if (response is ModelContextProtocol.Protocol.Types.CallToolResponse toolResponse)
+                    {
+                        foreach (var content in toolResponse.Content)
+                        {
+                            // Original response handling logic applied to the response for this line
+                            // Note: Removed redundant check `if (content.Type == "Text" && !String.IsNullOrEmpty(content.Text))`
+                            // as the subsequent check `if (!string.IsNullOrWhiteSpace(content.Text))` covers non-empty text.
+                            // If the original check had a different specific purpose, it might need to be adjusted.
+
+                            if (!string.IsNullOrWhiteSpace(content.Text))
+                            {
+                                Console.WriteLine(content.Text);
+                                // Be aware: This will be overwritten by the text from the *last* successfully processed line's response content.
+                                // If you need to accumulate results, you'll need a different approach (e.g., a List<string>).
+
+                                CurrentMessageToPassBackToAi += content.Text;
+                            }
+                            else if (content.Data is string data)
+                            {
+                                Console.WriteLine(data);
+                                // Consider if data should also update CurrentMessageToPassBackToAi
+                            }
+                            else if (content.Resource is { Uri: not null } resource)
+                            {
+                                Console.WriteLine($"[Resource]: {resource.Uri}");
+                                // Consider if resource URIs should update CurrentMessageToPassBackToAi
+                            }
+                            else
+                            {
+                                Console.WriteLine("[Unknown content format in response]");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine(response?.ToString() ?? "[null response]");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    // Include the specific line that caused the error in the message
+                    Console.WriteLine($"Error calling method for line '{trimmedLine}': {ex.Message}");
+                    Console.ResetColor();
+                    // Optionally decide if an error on one line should stop processing subsequent lines (e.g., add a 'break;' here)
+                }
+            }
+        }
+        return AnyCommandProcessed;
+    }
 
     static void PromptForConsoleInput()
     {
@@ -588,9 +470,6 @@ public class Program
         Console.ResetColor();
     }
 
-    /// <summary>
-    /// Determines the command (executable) to run and the script/path to pass to it.
-    /// </summary>
     static (string command, string arguments) GetCommandAndArguments(string[] args)
     {
         return ("C:\\Users\\User\\source\\repos\\mcp-csharp-sdk\\artifacts\\bin\\QuickstartWeatherServer\\Debug\\net8.0\\QuickstartWeatherServer.exe", "");
@@ -601,7 +480,7 @@ public class Program
 public class CommandProcessor
 {
     // Helper class to store command information
-    private class CommandInfo
+    public class CommandInfo
     {
         public string Name { get; set; }
         public string Description { get; set; }
@@ -622,8 +501,8 @@ public class CommandProcessor
     }
 
     // Dictionary to store available commands
-    private Dictionary<string, CommandInfo> availableCommands = new Dictionary<string, CommandInfo>(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, CommandInfo> commandAliases = new Dictionary<string, CommandInfo>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, CommandInfo> availableCommands = new Dictionary<string, CommandInfo>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, CommandInfo> commandAliases = new Dictionary<string, CommandInfo>(StringComparer.OrdinalIgnoreCase);
 
 
 
@@ -701,19 +580,6 @@ public class CommandProcessor
             string successMsg = $"Registered {availableCommands.Count} commands from the server.";
             Console.WriteLine(successMsg);
             outputLog.AppendLine(successMsg);
-
-            //string exampleHeader = $"-Here are some example call formats-";
-            //Console.WriteLine(exampleHeader);
-            //outputLog.AppendLine(exampleHeader);
-
-            //string example1 = $"sampleLLM prompt=hi, maxTokens=5";
-            //Console.WriteLine(example1);
-            //outputLog.AppendLine(example1);
-
-            //string example2 = $"MyarrayFunction arg=String1|String2|string3";
-            //Console.WriteLine(example2);
-            //outputLog.AppendLine(example2);
-
         }
         catch (Exception ex)
         {
@@ -726,8 +592,23 @@ public class CommandProcessor
         return outputLog.ToString();
     }
 
+    public bool DoesCommandExist(string query)
+    {
+        string[] lines = query.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            string[] parts = line.Split(new[] { ' ' }, 2);
+            string commandName = parts[0].ToLowerInvariant();
+            if (availableCommands.ContainsKey(commandName) || commandAliases.ContainsKey(commandName))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Process user input and map to appropriate commands
-    public bool ProcessUserInput(string userInput, out string method, out Dictionary<string, object?> parameters)
+    public bool ValidateAndTranslateCommand(string userInput, out string method, out Dictionary<string, object?> parameters)
     {
         method = string.Empty;
         parameters = new Dictionary<string, object?>();
