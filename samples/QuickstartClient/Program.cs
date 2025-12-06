@@ -59,7 +59,7 @@ public class Program
     //static string TaskString = "Type the Help Command, then exit";
     //static string TaskString = "You currently have zero task, just type 'end' when ready.";
 
-    static string initialPrompt = $@"You are an AI assistant with access to an MCP (Model Context Protocol) server. Your goal is to complete tasks by calling the available commands on this server.
+    static string CommandLineInitialPrompt = $@"You are an AI assistant with access to an MCP (Model Context Protocol) server. Your goal is to complete tasks by calling the available commands on this server.
         When you need to execute a command, output ONLY the command on a line, followed by the command name and parameters in the format: paramName=""value"". 
         Example: 
         my_command input_path=""C:\\path\\file.txt"", verbose=""true""
@@ -182,6 +182,74 @@ public class Program
         To see available commands type: help
         ";
 
+
+    static string JSONinitialPrompt = $@"You are an AI assistant with access to an MCP (Model Context Protocol) server. Your goal is to complete tasks by calling the available commands on this server.
+
+    When you need to execute a command, you MUST output the command as a valid, single-line JSON object. 
+    
+    Format:
+    {{ ""method"": ""CommandName"", ""parameters"": {{ ""paramName"": ""value"" }} }}
+
+    Wait for the result of the command before deciding your next step. I will provide the result of each command you issue.
+
+    # MCP Integration Guide for AI Assistants
+
+    ## Overview
+    You are connected to a Model Context Protocol (MCP) server that provides dynamic capabilities.
+    The client parses your responses line-by-line. To execute a tool, you must provide a standard JSON object.
+
+    ## Tool Discovery
+    Each tool has:
+    - `name`: The unique identifier (used in the ""method"" field)
+    - `inputSchema`: Describes the parameters (used in the ""parameters"" object)
+
+    ## Command Execution Rules
+
+    1. **Strict JSON Format**: Output commands as valid JSON.
+    2. **Single Line Per Command**: Do not pretty-print or split JSON across multiple lines. The parser reads one command per line.
+    3. **No Markdown**: Do not wrap your JSON in ```json code blocks. Output the raw JSON string only.
+    4. **Case Sensitivity**: Ensure parameter names match the schema exactly.
+
+    ### Parameter Types
+    - **Strings**: ""value""
+    - **Numbers**: 42 or 3.14 (Do not wrap numbers in quotes)
+    - **Booleans**: true or false (Do not wrap booleans in quotes)
+    - **Arrays**: [""item1"", ""item2""] (Use standard JSON arrays)
+
+    ## Example Scenarios
+
+    ### Example 1: Simple String Parameter
+    If a tool named ""Echo"" requires a ""message"":
+    {{ ""method"": ""Echo"", ""parameters"": {{ ""message"": ""Hello world"" }} }}
+
+    ### Example 2: Multiple Parameters
+    If a tool named ""GetWeather"" requires ""latitude"" (number) and ""longitude"" (number):
+    {{ ""method"": ""GetWeather"", ""parameters"": {{ ""latitude"": 40.7128, ""longitude"": -74.0060 }} }}
+
+    ### Example 3: Array Parameter
+    If a tool named ""ProcessItems"" requires an array of strings:
+    {{ ""method"": ""ProcessItems"", ""parameters"": {{ ""items"": [""apple"", ""banana"", ""orange""] }} }}
+
+    ### Example 4: Complex/Mixed Parameters
+    {{ ""method"": ""AnalyzeData"", ""parameters"": {{ ""values"": [10, 20, 30], ""threshold"": 5.5, ""enableFiltering"": true }} }}
+
+    ### Example 5: Batching Multiple Commands
+    You can execute multiple commands by outputting multiple JSON objects, each on its own new line:
+    {{ ""method"": ""GetWeather"", ""parameters"": {{ ""latitude"": 40.7128, ""longitude"": -74.0060 }} }}
+    {{ ""method"": ""Echo"", ""parameters"": {{ ""message"": ""Weather checked"" }} }}
+
+    ## Common Errors to Avoid
+    - **Do not** use `param=""val""` syntax. Use JSON `{{ ""key"": ""val"" }}`.
+    - **Do not** escape quotes unnecessarily inside the JSON structure.
+    - **Do not** output partial JSON. The entire object must be on one line.
+
+    Your Task is: {TaskString}
+
+    Once assigned task are completed type: end
+
+    To see available commands type: help
+    ";
+
     public static async Task Main(string[] args)
     {
         string? GeminiAIKey = Environment.GetEnvironmentVariable("GeminiAIKey");
@@ -189,6 +257,8 @@ public class Program
         string? MCPServerIP = Environment.GetEnvironmentVariable("MCPServerIP");
         string? MCPServerPORT = Environment.GetEnvironmentVariable("MCPServerPort");
         GeminiAI MyGem = new GeminiAI(GeminiAIKey);
+
+        //MyGem.ListModelsInConsole().Wait();
 
         if (AnthropicAIKey != null)
         {
@@ -229,7 +299,10 @@ public class Program
         Console.WriteLine("MCP Client Started!");
         Console.ResetColor();
 
-        CurrentMessageToPassBackToAi = initialPrompt;
+        //var InitialPrompt = CommandLineInitialPrompt;
+        var InitialPrompt = JSONinitialPrompt;
+
+        CurrentMessageToPassBackToAi = InitialPrompt;
         String? HumanResponse = null;
 
         bool shiftPressed = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -239,7 +312,7 @@ public class Program
         bool ExecuteAICommandOnInit = true; //Flag to detertmine who starts the convo first, AI=TRUE, Human=FALSE.
         if (!ExecuteAICommandOnInit)
         {
-            Console.WriteLine(await MyGem.SendChatMessageAsync(initialPrompt)); //If the Convo does not start with the AI, prompt the human first but preload the MCP instructions to the AI
+            Console.WriteLine(await MyGem.SendChatMessageAsync(InitialPrompt)); //If the Convo does not start with the AI, prompt the human first but preload the MCP instructions to the AI
         }
 
         while (HumanResponse != "exit") //Only Humans can exit the program
@@ -266,7 +339,7 @@ public class Program
             }
             else
             {
-                query = initialPrompt;
+                query = InitialPrompt;
             }
 
             while (!SignalBackToHumanControl) //If shift is held, skip to commandline
@@ -308,6 +381,7 @@ public class Program
 
                     if (string.IsNullOrWhiteSpace(query))
                     {
+                        System.Diagnostics.Debugger.Break();
                         PromptForConsoleInput();
                         continue;
                     }
@@ -390,10 +464,44 @@ public class Program
                 break;
             }
 
-            AnyCommandProcessed = MCPcommandProcessor.ValidateAndTranslateCommand(trimmedLine, out string method, out Dictionary<string, object?> parameters);
+            string method = string.Empty;
+            Dictionary<string, object?> parameters = new Dictionary<string, object?>();
+
+            if (IsValidJson(trimmedLine)) //Skip comment lines
+            {
+                AnyCommandProcessed = ParseJsonCommand(trimmedLine, out method, out parameters);
+            }
+            else
+            {
+                AnyCommandProcessed = MCPcommandProcessor.ValidateAndTranslateCommand(trimmedLine, out method, out parameters);
+            }
 
             if (AnyCommandProcessed)
             {
+
+                if (method.Equals("help", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Handle locally
+                    CurrentMessageToPassBackToAi += MCPcommandProcessor.DisplayHelpInfo();
+                    AnyCommandProcessed = true;
+                    continue;
+                }
+
+                if (method.Equals("list_tools", StringComparison.OrdinalIgnoreCase) ||
+                    method.Equals("refresh", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (mcpClient == null)
+                    {
+                        Console.WriteLine("MCP Client is not initialized.");
+                        continue;
+                    }
+                    // Handle locally by calling the SDK's discovery method
+                    CurrentMessageToPassBackToAi += await MCPcommandProcessor.RefreshAvailableCommandsAsync(mcpClient);
+                    AnyCommandProcessed = true;
+                    continue;
+                }
+
+
                 DidAnyCommandExecute = true;
                 Console.WriteLine($"Invoking command from line '{trimmedLine}'...");
 
@@ -462,6 +570,129 @@ public class Program
         return AnyCommandProcessed;
     }
 
+    // Parses a JSON string into a Method Name and a Dictionary of parameters
+    public static bool ParseJsonCommand(string jsonString, out string method, out Dictionary<string, object?> parameters)
+    {
+        method = string.Empty;
+        parameters = new Dictionary<string, object?>();
+
+        try
+        {
+            using (JsonDocument doc = JsonDocument.Parse(jsonString))
+            {
+                JsonElement root = doc.RootElement;
+
+                // Ensure the root is an object
+                if (root.ValueKind != JsonValueKind.Object) return false;
+
+                // Extract Method/Command Name
+                // Checks for "method", "command", or "tool" keys
+                if (root.TryGetProperty("method", out JsonElement methodProp) ||
+                    root.TryGetProperty("command", out methodProp) ||
+                    root.TryGetProperty("tool", out methodProp))
+                {
+                    method = methodProp.GetString() ?? string.Empty;
+                }
+                else
+                {
+                    // If no method name is specified, it's not a valid command payload
+                    return false;
+                }
+
+                // Extract Parameters
+                // Checks for "parameters", "args", or "arguments" keys
+                // Extract Parameters
+                // Try to find "parameters", then "args", then "arguments"
+                JsonElement paramsElement;
+
+                if (root.TryGetProperty("parameters", out paramsElement) ||
+                    root.TryGetProperty("args", out paramsElement) ||
+                    root.TryGetProperty("arguments", out paramsElement))
+                {
+                    // Check if the found element is actually a JSON Object
+                    if (paramsElement.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (JsonProperty prop in paramsElement.EnumerateObject())
+                        {
+                            parameters[prop.Name] = ConvertJsonElement(prop.Value);
+                        }
+                    }
+                }
+
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"JSON Parse Error: {ex.Message}");
+            return false;
+        }
+    }
+
+    // Recursively converts JsonElement back to native C# types (int, double, bool, string, null)
+    // This is critical because MCPClient likely expects native types, not JsonElements.
+    private static object? ConvertJsonElement(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var dict = new Dictionary<string, object?>();
+                foreach (var prop in element.EnumerateObject())
+                {
+                    dict[prop.Name] = ConvertJsonElement(prop.Value);
+                }
+                return dict;
+
+            case JsonValueKind.Array:
+                var list = new List<object?>();
+                foreach (var item in element.EnumerateArray())
+                {
+                    list.Add(ConvertJsonElement(item));
+                }
+                return list.ToArray();
+
+            case JsonValueKind.String:
+                return element.GetString();
+
+            case JsonValueKind.Number:
+                if (element.TryGetInt32(out int i)) return i;
+                if (element.TryGetInt64(out long l)) return l;
+                return element.GetDouble();
+
+            case JsonValueKind.True:
+                return true;
+
+            case JsonValueKind.False:
+                return false;
+
+            case JsonValueKind.Null:
+                return null;
+
+            default:
+                return element.ToString();
+        }
+    }
+    public static bool IsValidJson(string jsonString)
+    {
+        if (string.IsNullOrWhiteSpace(jsonString)) return false;
+
+        try
+        {
+            // JsonDocument.Parse analyzes the syntax without instantiating a full object
+            using (JsonDocument doc = JsonDocument.Parse(jsonString))
+            {
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (Exception) // Handle other potential errors (e.g. argument null)
+        {
+            return false;
+        }
+    }
     static void PromptForConsoleInput()
     {
         Console.WriteLine("Enter a command (or exit to quit or help for available commands):");
