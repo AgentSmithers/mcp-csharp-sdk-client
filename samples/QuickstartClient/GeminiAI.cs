@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using Newtonsoft.Json; // Use Newtonsoft.Json consistently
 using Newtonsoft.Json.Serialization; // For CamelCasePropertyNamesContractResolver if needed, not used here
@@ -45,6 +45,31 @@ namespace QuickstartClient // Ensure this namespace is correct
         public class SafetyRating { [JsonProperty("category")] public string Category { get; set; } = null!; [JsonProperty("probability")] public string Probability { get; set; } = null!; }
         public class PromptFeedback { [JsonProperty("safetyRatings")] public SafetyRating[] SafetyRatings { get; set; } = Array.Empty<SafetyRating>(); }
 
+        // Response container for the list of models
+        public class ModelListResponse
+        {
+            [JsonProperty("models")]
+            public ModelInfo[] Models { get; set; } = Array.Empty<ModelInfo>();
+        }
+
+        // Detailed information about a specific model
+        public class ModelInfo
+        {
+            [JsonProperty("name")]
+            public string Name { get; set; } = string.Empty; // e.g., "models/gemini-1.5-pro"
+
+            [JsonProperty("displayName")]
+            public string DisplayName { get; set; } = string.Empty;
+
+            [JsonProperty("description")]
+            public string Description { get; set; } = string.Empty;
+
+            [JsonProperty("version")]
+            public string Version { get; set; } = string.Empty;
+
+            [JsonProperty("supportedGenerationMethods")]
+            public string[] SupportedGenerationMethods { get; set; } = Array.Empty<string>();
+        }
         #endregion // Gemini API Data Classes
 
         /// <summary>
@@ -53,7 +78,7 @@ namespace QuickstartClient // Ensure this namespace is correct
         /// <param name="apiKey">Your Google API Key.</param>
         /// <param name="modelNameInput">The specific Gemini model to use (e.g., "gemini-1.5-pro-latest"). Uses default if null/empty.</param>
         /// <exception cref="ArgumentNullException">Thrown if apiKey is null or empty.</exception>
-        public GeminiAI(string? apiKey, string modelNameInput = "gemini-2.5-pro-preview-03-25") // Default to a stable model //gemini-1.5-pro-latest
+        public GeminiAI(string? apiKey, string modelNameInput = "gemini-3-pro-preview") // Default to a stable model //gemini-1.5-pro-latest
         {
             if (string.IsNullOrEmpty(apiKey))
             {
@@ -65,7 +90,7 @@ namespace QuickstartClient // Ensure this namespace is correct
             // Use the input model name, or the default if input is invalid
             if (string.IsNullOrEmpty(modelNameInput))
             {
-                this.modelName = "gemini-2.5-pro-preview-03-25"; // Use the default from parameter signature
+                this.modelName = "gemini-3-pro-preview"; // Use the default from parameter signature
                 Debug.WriteLine($"Warning: Model name was empty, defaulting to {this.modelName}");
             }
             else
@@ -78,6 +103,28 @@ namespace QuickstartClient // Ensure this namespace is correct
             // Optional: Configure static HttpClient defaults once if needed
             // Consider thread safety if modifying static properties after startup
             // if (httpClient.Timeout == TimeSpan.Zero) { httpClient.Timeout = TimeSpan.FromSeconds(120); }
+        }
+
+        public async Task<List<ModelInfo>?> ListModelsInConsole()
+        {
+            var models = await ListAvailableModelsAsync();
+
+            if (models != null)
+            {
+                foreach (var model in models)
+                {
+                    // Filters specifically for models that can generate text/chat
+                    if (model.SupportedGenerationMethods.Contains("generateContent"))
+                    {
+                        // Note: The API returns names like "models/gemini-pro". 
+                        // You usually need to strip "models/" when making requests, 
+                        // though the Google SDKs handle both.
+                        Console.WriteLine($"Found Model: {model.Name} ({model.DisplayName})");
+                    }
+                }
+                return models;
+            }
+            return null;
         }
 
         /// <summary>
@@ -210,6 +257,47 @@ namespace QuickstartClient // Ensure this namespace is correct
             catch (HttpRequestException httpEx) { Debug.WriteLine($"Network Error during inference: {httpEx.ToString()}"); return null; }
             catch (JsonException jsonEx) { Debug.WriteLine($"JSON Error processing inference response: {jsonEx.ToString()}"); return null; } // Use fully qualified name if needed
             catch (Exception ex) { Debug.WriteLine($"Unexpected Error during inference: {ex.ToString()}"); return null; }
+        }
+
+        /// <summary>
+        /// Retrieves a list of available models from the Gemini API.
+        /// </summary>
+        /// <returns>A list of ModelInfo objects, or null if the request fails.</returns>
+        public async Task<List<ModelInfo>?> ListAvailableModelsAsync()
+        {
+            try
+            {
+                // Construct URL: Remove trailing slash from Base and add API key
+                // Endpoint: https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_KEY
+                string baseUrl = ApiUrlBase.TrimEnd('/');
+                string apiUrl = $"{baseUrl}?key={this.apiKey}";
+
+                Debug.WriteLine("Fetching available models...");
+
+                // Perform GET request
+                HttpResponseMessage response = await httpClient.GetAsync(apiUrl);
+                string jsonResponse = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var listResponse = JsonConvert.DeserializeObject<ModelListResponse>(jsonResponse);
+
+                    // Optional: Filter only for models that support content generation (chat)
+                    // return listResponse?.Models.Where(m => m.SupportedGenerationMethods.Contains("generateContent")).ToList();
+
+                    return listResponse?.Models.ToList();
+                }
+                else
+                {
+                    Debug.WriteLine($"API Error listing models: {(int)response.StatusCode} - {response.ReasonPhrase}\nResponse: {jsonResponse}");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error listing models: {ex.Message}");
+                return null;
+            }
         }
 
         /// <summary>
